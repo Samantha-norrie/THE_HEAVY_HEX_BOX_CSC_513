@@ -1,16 +1,27 @@
-from flask import Flask, request
 import serial
+import time
+import sys
+from qiskit import *
+import numpy as np
+from PyQt5.QtWidgets import QApplication
+from fe import TheHeavyHexBoxFE
 
-app = Flask(__name__)
-arduino = serial.Serial('/dev/cu.usbmodem1101', 9600)  # Adjust to your Arduino's port
+app = QApplication(sys.argv)
+main_window = TheHeavyHexBoxFE()
+main_window.show()
+sys.exit(app.exec_())
+# try:
+    
+#     while True:
+#         # Read data from Arduino
+#         if arduino.in_waiting > 0:
+#             message = arduino.readline().decode('utf-8').strip()
+#             print(f"Arduino: {message}")
 
-@app.route('/command', methods=['POST'])
-def send_command():
-    data = request.json
-    if 'command' in data:
-        arduino.write(data['command'].encode())
-        return "Command sent!", 200
-    return "Invalid request", 400
-
-if __name__ == '__main__':
-    app.run(debug=True)
+#         # Send a command to Arduino
+#         command = input("Enter a command for Arduino (or type 'exit'): ")
+#         if command.lower() == 'exit':
+#             break
+#         arduino.write(('6').encode('utf-8'))  # Send command
+# finally:
+#     arduino.close()
