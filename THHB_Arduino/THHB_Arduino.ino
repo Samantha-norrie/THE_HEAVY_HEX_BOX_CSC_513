@@ -1,6 +1,3 @@
-#include "Qubit.h"
-#include "Gate.h"
-const int MAX_SIZE = 10;
 int index = 0;
 const String T = "T";
 const String t = "t";
@@ -25,8 +22,10 @@ const int five = 5;
 const int four = 4;
 const int three = 3;
 
-int gateIndex = 0;
-Gate* gates[20] = {nullptr};
+
+const int CONTROL_QUBITS[6] = {1, 3, 5, 7, 9, 11};
+const int TARGET_QUBITS[6] = {0, 2, 4, 6, 8, 10};
+
 /*
  * 0 = not receiving input
  * 1 = receiving controls
@@ -39,6 +38,53 @@ int tempTargetIndex = 0;
 int tempControl[12] = {-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1};
 int tempTarget[12] = {-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1};
 
+// store pins of violating qubits
+int violationsIndex = 0;
+int violations[12] = {-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1};
+bool violationOnOff = false;
+bool flagAllQubits = false;
+
+/*
+TODO: Fix. No rhyme or reason for these configurations, 
+just the consequence of gluing the hardware together before writing the code!
+*/
+
+void turnOffAllLEDs() {
+  for (int i = 0; i < 12; i++) {
+    digitalWrite(i, LOW);
+  }
+}
+int convertQubitToPin(int qubitIndex) {
+  switch (qubitIndex) {
+    case 0:
+      return 2; //TODO
+    case 1:
+      return 10;
+    case 2:
+      return 6;
+    case 3:
+      return 8;
+    case 4:
+      return 12;
+    case 5:
+      return 3;
+    case 6:
+      return 7;
+    case 7:
+      return 13;
+    case 8:
+      return 4;
+    case 9:
+      return 9;
+    case 10:
+      return 5;
+    case 11:
+      return 11;
+  }
+  return -1;
+}
+
+// Turn all LEDs on and off
 void startSequence() {
   for (int i = 2; i <= 13; i++) {
     digitalWrite(i, HIGH);
@@ -48,38 +94,74 @@ void startSequence() {
     digitalWrite(i, LOW);
   }
 }
-void handleCurrentGate(Gate curr) {
-  for(int i = 0; i < 12; i++) {
-    if (curr.getControlQubits()[i] != -1) {
-      digitalWrite(curr.getControlQubits()[i], HIGH);
+
+// Check if qubit at index is a control qubit
+bool isControlQubit(int qubitIndex) {
+  for (int i = 0; i < 6; i++) {
+    if (CONTROL_QUBITS[i] == qubitIndex) {
+      return true;
     }
-    if (curr.getTargetQubits()[i] != -1) {
-      digitalWrite(curr.getTargetQubits()[i], HIGH);
-    }
+  }
+  return false;
+}
+
+void handleViolations(bool on) {
+  for (int i = 0; i < violationsIndex; i++) {
+    digitalWrite(violations[i], on? HIGH: LOW);
+  }
+  // delay(1000);
+  // for (int i = 0; i < violationsIndex; i++) {
+  //   digitalWrite(violations[i], LOW);
+  // }
+
+}
+
+void clearArray(int arr[12]) {
+  for (int i = 0; i < 12; i++) {
+    arr[i] = -1;
   }
 }
 
-void handleSequence() {
-  startSequence();
-  for (int i = 0; i < 20; i++) {
-    if (gates[i] != nullptr) {
-      handleCurrentGate(*gates[i]);
+// Illuminate LEDs for properly placed qubits, note misplaced qubits
+void handleOperation() {
+
+  // for target qubits
+  for (int i = 0; i <= tempTargetIndex; i++) {
+    int currQubit = tempTarget[i];
+    int convertedPin = convertQubitToPin(tempTarget[i]);
+    if (flagAllQubits || isControlQubit(currQubit)) {
+      violations[violationsIndex] = convertedPin;
+      violationsIndex++;
+    } else {
+      digitalWrite(convertedPin, HIGH);
     }
   }
+
+  // For control qubits
+  if (tempTarget[0] != -1) {
+    for (int i = 0; i <= tempControlIndex; i++) {
+      int currQubit = tempControl[i];
+      int convertedPin = convertQubitToPin(tempControl[i]);
+      if (flagAllQubits || !isControlQubit(currQubit)) {
+        violations[violationsIndex] = convertedPin;
+        violationsIndex++;
+      } else {
+        digitalWrite(convertedPin, HIGH);
+      }
+    }
+  // for single-qubit gate
+  } else {
+    digitalWrite(convertQubitToPin(tempControl[0]), HIGH);
+  }
+
+  clearArray(tempControl);
+  tempControlIndex = 0;
+  clearArray(tempTarget);
+  tempTargetIndex = 0;
 }
 
 void setup() {
   Serial.begin(9600);
-  Qubit qubitOne(1, 10, C);
-  Qubit qubitTwo(2, 6, t);
-  Qubit qubitThree(3, 8, C);
-  Qubit qubitFive(5, 12, T);
-  Qubit qubitSix(6, 7, t);
-  Qubit qubitSeven(7, 13, C);
-  Qubit qubitNine(9, 9, C);
-  Qubit qubitTen(10, 5, t);
-  Qubit qubitEleven(11, 11, C);
-
   pinMode(twelve, OUTPUT);
   pinMode(eleven, OUTPUT);
   pinMode(ten, OUTPUT);
@@ -96,43 +178,60 @@ void setup() {
 
 void loop() {
 
-  if (Serial.available() > 0) {
+  if (violationsIndex != 0) {
+    violationOnOff = !violationOnOff;
+    handleViolations(violationOnOff);
+  } else if (Serial.available() > 0) {
 
     // indicate that input is being received
     if (inputPhase == 0) {
+      startSequence();
       inputPhase = 1;
     }
     char incomingChar = Serial.read();
+    // Done receiving
     if (incomingChar == 'D') {
       inputPhase = 0;
       if (tempControl[0] != -1) {
-        gates[gateIndex] = new Gate(tempControl, tempTarget);
+        turnOffAllLEDs();
+        handleOperation();
       }
-      handleSequence();
+    } else if (incomingChar == '\n') {
+      turnOffAllLEDs();
+      handleOperation();
+      // violationsIndex = 0;
+      // clearArray(violations);
+    // Control qubits incoming
     } else if (incomingChar == 'C') {
       inputPhase = 1;
-      if (tempControl[0] != -1) {
-        gates[gateIndex] = new Gate(tempControl, tempTarget);
-        gateIndex++;
-      }
+      // if (tempControl[0] != -1) {
+      //   turnOffAllLEDs();
+      //   handleOperation();
+      // }
+    // Target qubits incoming
+    } else if (incomingChar == 'V') {
+      flagAllQubits = true;
     } else if (incomingChar == 'T') {
       inputPhase = 2;
+    // TODO remove
     } else if (incomingChar == ' ') {
       int i = 0;
     } else {
+      int qubit = incomingChar - '0';
+      // if (flagAllQubits) {
+      //   // violations[violationsIndex] = convertQubitToPin(qubit);
+      //   // violationsIndex++;
+      // } else 
       if (inputPhase == 1) {
-        tempControl[tempControlIndex] = incomingChar - '0';
+        tempControl[tempControlIndex] = qubit;
         tempControlIndex++;
       } else {
-        tempTarget[tempTargetIndex] = incomingChar - '0';
+        tempTarget[tempTargetIndex] = qubit;
         tempTargetIndex++;
       }
     }
-    int newPin = incomingChar - '0';
-    digitalWrite(newPin, HIGH);
-    Serial.print("Received from Python: ");
-    delay(1000);
-  }                
+  }
+  delay(1000);                
 
 }
 
